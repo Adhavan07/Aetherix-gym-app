@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "types": ["node"],
+    "lib": ["ES2022"],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "allowJs": true,
+    "noEmit": true
+  },
+  "include": ["server.ts"],
+  "exclude": ["dist", "frontend", "api", "node_modules"]
+}

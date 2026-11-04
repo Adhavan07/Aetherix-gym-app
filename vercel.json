@@ -1,0 +1,15 @@
+{
+  "installCommand": "npm install --legacy-peer-deps",
+  "buildCommand": "npm --prefix frontend run build",
+  "outputDirectory": "frontend/dist",
+  "rewrites": [
+    {
+      "source": "/exercise-media/:kind/:file",
+      "destination": "https://raw.githubusercontent.com/DuarteSantos8/openGym/main/catalogue/media/:kind/:file"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "/api/vercel.js"
+    }
+  ]
+}

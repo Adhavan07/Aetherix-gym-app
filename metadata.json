@@ -1,0 +1,6 @@
+{
+  "name": "Aetherix — Workouts, Activity & Calorie Tracker",
+  "description": "Self-hosted, offline-first strength workout, MET activity burn, and daily food calorie tracker built with Aetherix.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
