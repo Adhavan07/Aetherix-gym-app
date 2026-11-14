@@ -69,6 +69,7 @@ export const mapSetWeights = (set, c, prev) => {
   } })
   if (out.w != null) out.w = c(out.w, p?.w)
   if (Array.isArray(out.drops)) out.drops = out.drops.map((d, i) => ({ ...d, w: c(d.w, p?.drops?.[i]?.w) }))
+  if (Array.isArray(out.subLifts)) out.subLifts = out.subLifts.map((m, i) => ({ ...m, w: c(m.w, p?.subLifts?.[i]?.w) }))
   return out
 }
 export const mapTargetWeights = (cfg, c, prev, cInc = c) => {
@@ -83,6 +84,7 @@ export const mapTargetWeights = (cfg, c, prev, cInc = c) => {
   if (Array.isArray(out.warmup)) out.warmup = out.warmup.map((w, i) => (w && w.weight != null ? { ...w, weight: c(w.weight, p.warmup?.[i]?.weight) } : w))
   // A pyramid's own weight per set; 0 ("no plan for this set") stays 0.
   if (Array.isArray(out.pyramidWeight)) out.pyramidWeight = out.pyramidWeight.map((w, i) => (w > 0 ? c(w, p.pyramidWeight?.[i]) : w))
+  if (Array.isArray(out.subLifts)) out.subLifts = out.subLifts.map((m, i) => ({ ...m, w: c(m.w, p.subLifts?.[i]?.w) }))
   return out
 }
 export const mapEntryWeights = (e, c, prev, cInc = c) => {

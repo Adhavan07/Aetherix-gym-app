@@ -31,6 +31,7 @@ import {
 } from '../lib/rotation.js'
 import { isOn } from '../lib/modules.js'
 import { unlockBadgeInState } from '../lib/badges.js'
+import { findJvrRoundRoutine, installJvrRoundRoutine } from '../lib/jvr-round.js'
 
 // Plan has two views (v1.3.11): Schedule (how you train, and when) and Routines (what you
 // train). The last one you looked at comes back: a per-device convenience, never synced, so it
@@ -450,6 +451,19 @@ function Routines({ S, update, nav }) {
   const order = weekOrder(weekStartOf(S))
   const daysOf = id => order.filter(d => [].concat(S.week[d] || []).includes(id)).map(d => t(DAYS[d]))
   const sub = r => [exCount(r.ex.length), daysOf(r.id).join(', ')].filter(Boolean).join(' · ')
+  const jvrRoutine = findJvrRoundRoutine(S)
+  const openOrInstallJvr = () => {
+    if (jvrRoutine) {
+      nav('/plan/r/' + jvrRoutine.id)
+      return
+    }
+    let result = null
+    update(s => { result = installJvrRoundRoutine(s) })
+    if (result?.id) {
+      useUI.getState().toast(t('JVR Round added (14 exercises · 40s rest)'))
+      nav('/plan/r/' + result.id)
+    }
+  }
 
   return <>
     <div className="row between plan-sec-h plan-routines-bar">
@@ -457,6 +471,18 @@ function Routines({ S, update, nav }) {
         ? <button className="plan-textbtn" aria-pressed={edit} onClick={() => setEdit(e => !e)}>{edit ? t('Done') : t('Edit')}</button>
         : <span />}
       <Button size="sm" variant="tinted" icon="plus" data-tour="plan-new" onClick={addRoutine}>{t('New routine')}</Button>
+    </div>
+    <div className="card jvr-plan-card" data-jvr-plan-card>
+      <div className="jvr-plan-lead">
+        <span className="lrow-i tint-orange" aria-hidden="true"><Icon name="bolt" /></span>
+        <div className="grow">
+          <div className="jvr-plan-title">{t('JVR Round Conditioning')}</div>
+          <div className="jvr-plan-sub">{t('14 explosive & full-body exercises · 40s rest · 5-move Batman Barbell Complex')}</div>
+        </div>
+      </div>
+      <Button size="sm" variant={jvrRoutine ? 'tinted' : 'primary'} icon={jvrRoutine ? 'chevronRight' : 'plus'} onClick={openOrInstallJvr} data-install-jvr>
+        {jvrRoutine ? t('Open JVR Round') : t('Add JVR Round')}
+      </Button>
     </div>
     {routines.length ? <>
       {edit

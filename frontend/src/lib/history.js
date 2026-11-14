@@ -206,6 +206,9 @@ export function setLabel(id, s, cfg, speedUnit) {
       return `${t(key)} ${partial && !side.done ? '–' : oneSide(side) + effortTail(side)}`
     }).join(' · ') + fail
   }
+  if (Array.isArray(s?.subLifts) && s.subLifts.length > 0) {
+    return s.subLifts.map(m => `${fmtNum(Number(m?.w) || 0)}×${Number(m?.r) || 0}`).join(' · ') + fail + effortTail(s)
+  }
   // Bodyweight reads as what you did — "12", or "+10 × 12" once there is a belt involved —
   // rather than "0×12", which says a set was performed with no weight and means nothing.
   return oneSide(s) + fail + effortTail(s)
@@ -253,6 +256,10 @@ export function setsRepsOf(cfg) {
 export function exLine(cfg, unit, speedUnit) {
   const mode = modeOf(cfg)
   const n = cfg.sets || 1
+  if (Array.isArray(cfg?.subLifts) && cfg.subLifts.length > 0) {
+    const restTail = cfg.restSec > 0 ? ` · ${cfg.restSec}s ${t('rest')}` : ''
+    return `${n} × ${cfg.subLifts.length} ${t('moves')} (5 ${t('reps ea')})${restTail}`
+  }
   // Added weight reads as added: "+10 kg" on a dip belt, "60 kg" on a barbell.
   // Back-off sets read as the sequence they open at: "3 × 6 · 26 → 24 → 22 kg".
   const backoff = mode === 'reps' && cfg.weight > 0 ? backoffStepOf(cfg, unit) : 0
@@ -659,6 +666,17 @@ function buildWorkSets(S, cfg, options = {}) {
       const planned = pyramidWeightAt(cfg, i)
       if (planned > 0 && !(preferLast && usable)) row.w = planned
       else if (useTarget && seed) row.w = seed.w
+    }
+    if (Array.isArray(cfg.subLifts) && cfg.subLifts.length > 0) {
+      const prevSub = Array.isArray(prev?.subLifts) && prev.subLifts.length === cfg.subLifts.length ? prev.subLifts : null
+      const subLifts = cfg.subLifts.map((m, mi) => ({
+        ...m,
+        r: !planReps && prevSub?.[mi]?.r > 0 ? Number(prevSub[mi].r) : (Number(m.r) || 5),
+        w: !useTarget && prevSub?.[mi]?.w > 0 ? Number(prevSub[mi].w) : (Number(m.w) || 0),
+      }))
+      row.subLifts = subLifts
+      row.r = subLifts.reduce((sum, m) => sum + (Number(m.r) || 0), 0)
+      row.w = subLifts.reduce((mx, m) => Math.max(mx, Number(m.w) || 0), 0)
     }
     // A unilateral exercise logs each side on its own (issue #60): the row splits into L/R,
     // each seeded with half the total reps at the same weight. When "last time" was itself a
@@ -1206,7 +1224,9 @@ function copyOfRow(src) {
     const side = sd => ({ ...bare(sd), done: false })
     return syncSideAggregate({ ...bare(src), sides: { L: side(src.sides.L), R: side(src.sides.R) }, done: false })
   }
-  return { ...bare(src), done: false }
+  const out = { ...bare(src), done: false }
+  if (Array.isArray(out.subLifts)) out.subLifts = out.subLifts.map(m => ({ ...m }))
+  return out
 }
 
 /** "One more like this one": a copy of row `i` right below it, unticked and without sub-rows.

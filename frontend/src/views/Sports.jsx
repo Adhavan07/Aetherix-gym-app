@@ -20,6 +20,13 @@ import Icon from '../components/Icon.jsx'
 import CardHead from '../components/CardHead.jsx'
 import { ActivityRow, openActivitySheet } from '../components/Activities.jsx'
 import { Button, SearchField, Segmented, Stepper } from '../components/ui.jsx'
+import { evaluateSafetyProfile } from '../lib/conditioning.js'
+import {
+  HealthSafetyBanner,
+  HyroxWorkoutPanel,
+  HiitWorkoutAndTimerPanel,
+  openHealthSafetySheet,
+} from '../components/HyroxHiitStudio.jsx'
 
 const FILTER_OPTIONS = [
   { key: 'all', label: 'All (18)' },
@@ -369,6 +376,8 @@ export default function Sports() {
   const S = useStore(s => s.S)
   const openSheet = useUI(s => s.openSheet)
 
+  const [section, setSection] = useState('matrix')
+  const [hiitPreset, setHiitPreset] = useState('tabata')
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
   const [sortBy, setSortBy] = useState('rank')
@@ -378,6 +387,7 @@ export default function Sports() {
 
   const today = todayISO()
   const week = useMemo(() => weeklyHybridSportsSummary(S, today), [S, today])
+  const safety = useMemo(() => evaluateSafetyProfile(S?.healthProfile, S), [S])
 
   const visibleSports = useMemo(
     () => filterAndSortSports(SPORTS_RANKING, { query, filter, sortBy, sortDir }),
@@ -454,9 +464,18 @@ export default function Sports() {
       <div className="hdr">
         <div>
           <h1>{t('Sports')}</h1>
-          <div className="sub">{t('The 18-sport completeness matrix & hybrid tracker')}</div>
+          <div className="sub">{t('18-sport matrix, Hyrox, HIIT timer & safety check')}</div>
         </div>
         <div className="hdr-r">
+          <Button
+            size="sm"
+            variant={safety.complete ? 'tinted' : 'primary'}
+            icon="shield"
+            onClick={() => openHealthSafetySheet()}
+            data-hdr-safety
+          >
+            {t('Safety')}
+          </Button>
           <Button size="sm" variant="tinted" icon="target" onClick={openGoalSheet}>
             {t('Goal')}
           </Button>
@@ -465,6 +484,21 @@ export default function Sports() {
           </Button>
         </div>
       </div>
+
+      <div className="sp-subnav-wrap" data-sports-subnav>
+        <Segmented
+          value={section}
+          onChange={setSection}
+          options={[
+            { value: 'matrix', label: t('18 Sports'), icon: 'grid' },
+            { value: 'hyrox', label: t('Hyrox'), icon: 'bolt' },
+            { value: 'hiit', label: t('HIIT Timer'), icon: 'timer' },
+          ]}
+        />
+      </div>
+
+      {/* Health & Safety Profile Card (Weight, Height, BMI, Medications, Painful Areas) */}
+      <HealthSafetyBanner S={S} safety={safety} compact={section === 'matrix'} />
 
       {/* Weekly conditioning + Live Hybrid Coverage */}
       <div className="sports-top-grid">
@@ -516,7 +550,10 @@ export default function Sports() {
                 type="button"
                 key={p.key}
                 className="sp-cov-item"
-                onClick={() => handleSortSelect(p.key)}
+                onClick={() => {
+                  setSection('matrix')
+                  handleSortSelect(p.key)
+                }}
                 title={t('Sort matrix by {0}', t(p.label))}
               >
                 <PillarDot level={week.coverage[p.key]} label={p.label} />
@@ -528,6 +565,19 @@ export default function Sports() {
         </div>
       </div>
 
+      {section === 'hyrox' ? (
+        <HyroxWorkoutPanel
+          S={S}
+          safety={safety}
+          onLaunchTimer={preset => {
+            setHiitPreset(preset || 'hyrox_emom')
+            setSection('hiit')
+          }}
+        />
+      ) : section === 'hiit' ? (
+        <HiitWorkoutAndTimerPanel S={S} safety={safety} initialPresetKey={hiitPreset} />
+      ) : (
+        <>
       {/* Controls: search, filters, sort, view mode */}
       <div className="card sp-controls-card">
         <div className="sp-controls-top">
@@ -823,6 +873,8 @@ export default function Sports() {
           })}
         </div>
       )}
+        </>
+      )}
 
       {/* Recent logged sport & activity sessions */}
       <div className="card sp-history-card" data-sports-recent>
@@ -857,7 +909,7 @@ export default function Sports() {
       </div>
 
       {/* Sticky comparison bar when >= 1 sport is pinned */}
-      {comparedSports.length > 0 && (
+      {section === 'matrix' && comparedSports.length > 0 && (
         <div className="sp-compare-dock" data-sports-compare-dock>
           <div className="sp-dock-names">
             <span className="sp-dock-k">{t('Compare ({0}/3)', comparedSports.length)}</span>

@@ -58,7 +58,7 @@ import { markAllSetsDone, sessionHistory } from '../lib/backfill.js'
 import { bindWatchActions, markDiscarded } from '../lib/watch-sync.js'
 import { bestSetFor } from '../lib/exercise-history.js'
 import { bindLiveActions } from '../lib/live-activity.js'
-import { isWarmupRow, isFailureSet, toggleFailure, isDropSet, isRestPauseSet, dropsOf, clustersOf, addDrop, addCluster, removeDropAt, removeClusterAt, setDropAt, setClusterAt, nextDropWeight, nextBurstReps, isSideSet, makeSideSet, setSideField, toggleSide, addSideDrop, removeSideDropAt, setSideDropAt, addSideCluster, removeSideClusterAt, setSideClusterAt, WEIGHT_ORIGIN_MANUAL, markWarmupEdited } from '../lib/workout-model.js'
+import { isWarmupRow, isFailureSet, toggleFailure, isDropSet, isRestPauseSet, dropsOf, clustersOf, addDrop, addCluster, removeDropAt, removeClusterAt, setDropAt, setClusterAt, nextDropWeight, nextBurstReps, isSideSet, isComplexSet, makeSideSet, setSideField, toggleSide, addSideDrop, removeSideDropAt, setSideDropAt, addSideCluster, removeSideClusterAt, setSideClusterAt, WEIGHT_ORIGIN_MANUAL, markWarmupEdited } from '../lib/workout-model.js'
 import { canMoveActiveWorkoutUnit, moveActiveWorkoutUnit, canMoveActiveWorkoutEntry, moveActiveWorkoutEntry } from '../lib/active-workout-order.js'
 import { nextOpenSet, workoutKeyAction } from '../lib/workout-keys.js'
 import { MUSCLE_NAME } from '../lib/muscles.js'
@@ -226,6 +226,14 @@ function ExerciseBlock({ entryIdx, compact, dense, editing, onToggle, onToggleSi
       rerampOpen(s, e, i)
     }), true)
   }
+  const setSubLift = (i, mi, field, v) => mutSet(i, row => {
+    const subLifts = Array.isArray(row.subLifts)
+      ? row.subLifts.map((m, idx) => (idx === mi ? { ...m, [field]: Math.max(0, Number(v) || 0) } : m))
+      : []
+    const totalR = subLifts.reduce((sum, m) => sum + (Number(m.r) || 0), 0)
+    const maxW = subLifts.reduce((mx, m) => Math.max(mx, Number(m.w) || 0), 0)
+    return { ...row, subLifts, r: totalR, w: maxW }
+  })
   // Drop/burst edits accept an optional `side` ('L'|'R'): present for a per-side row (edits that
   // one limb's drop/burst), absent for a straight row (edits the row's own).
   const removeDrop = (i, di) => mutSet(i, row => isSideSet(row) ? removeSideDropAt(row, di) : removeDropAt(row, di))
@@ -727,7 +735,49 @@ function ExerciseBlock({ entryIdx, compact, dense, editing, onToggle, onToggleSi
   // from. The button's own label speaks for it, so a screen reader hears it with the set number.
   const failMark = s => isFailureSet(s) ? <span className="failmark" aria-hidden="true">{t('F')}</span> : null
   const failSay = (s, label) => isFailureSet(s) ? label + ', ' + t('Taken to failure') : label
-  const plainRow = (s, i) => (
+  const hasComplexSets = entry.sets.some(isComplexSet)
+  const plainRow = (s, i) => isComplexSet(s) ? (
+    <div ref={el => onSetRowRef?.(i, el)} data-tour="set" data-complex-set={i} className={'complex-set-card' + (s.done ? ' done' : '')}>
+      <div className="complex-set-head">
+        <button type="button" className="n" aria-label={trendSay(i, failSay(s, t('Set {0}', setNumOf(s, i))))} aria-describedby={optsId} title={t('More')} onClick={() => openSetMenu(s, i)}>{setNumOf(s, i)}{failMark(s)}{trendMark(i)}</button>
+        <div className="complex-set-meta">
+          <div className="complex-set-title">{t('Set {0} · 5-Move Barbell Complex', setNumOf(s, i))}</div>
+          <div className="complex-set-sub">{t('{0} total reps', s.subLifts.reduce((sum, m) => sum + (Number(m.r) || 0), 0))}</div>
+        </div>
+        <Check checked={s.done} tour="tick" label={t('Set {0} done', setNumOf(s, i))} onChange={() => onToggle(i)} />
+      </div>
+      <div className="complex-moves-list">
+        {s.subLifts.map((m, mi) => (
+          <div key={m.key || mi} className="complex-move-row" data-complex-move={m.key || mi}>
+            <div className="complex-move-name">
+              <span className="complex-move-idx">{mi + 1}</span>
+              <span>{t(m.name)}</span>
+            </div>
+            <div className="complex-move-inputs">
+              <label className="complex-field">
+                <span className="complex-field-lbl">{S.unit}</span>
+                <NumberField
+                  decimal
+                  value={m.w ?? 0}
+                  aria-label={`${m.name} weight (${S.unit})`}
+                  onChange={v => setSubLift(i, mi, 'w', v)}
+                />
+              </label>
+              <label className="complex-field">
+                <span className="complex-field-lbl">{t('Reps')}</span>
+                <NumberField
+                  decimal={false}
+                  value={m.r ?? 5}
+                  aria-label={`${m.name} reps`}
+                  onChange={v => setSubLift(i, mi, 'r', v)}
+                />
+              </label>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  ) : (
     <div ref={el => onSetRowRef?.(i, el)} data-tour="set" className={'setrow' + (s.done ? ' done' : '') + (col3 ? ' eff3' : '') + (timed ? ' timed' : '')}>
       <button type="button" className="n" aria-label={trendSay(i, failSay(s, sideTagOf(s) ? t('Set {0} ({1})', setNumOf(s, i), sideTagOf(s)) : t('Set {0}', setNumOf(s, i))))} aria-describedby={optsId} title={t('More')} onClick={() => openSetMenu(s, i)}>{setNumOf(s, i)}{failMark(s)}{trendMark(i)}</button>
       {/* Both words sit in the pill's one grid cell (::before/::after, hidden), so Left and
@@ -828,7 +878,9 @@ function ExerciseBlock({ entryIdx, compact, dense, editing, onToggle, onToggleSi
     <div className="card" style={{ marginTop: 10, marginBottom: 0 }}>
       {/* the header carries the same eff3/timed sizing as the rows, or the labels drift off their
           columns; over L/R rows it also has to skip the side badge that sits in front of the weight cell */}
-      <div className={'sethead' + (col3 ? ' eff3' : '') + (timed ? ' timed' : '') + (perSide ? ' per-side' : '') + (wc.steppers ? '' : ' plain')}><span className="n-sp" /><span className="w-sp">{col1.hd}</span>{col2 && <span className="r-sp">{col2.hd}</span>}{col3 && <span className={col3.eff ? 'eff-sp' : 'r-sp'}>{col3.hd}</span>}{timed && <span className="ck-sp" />}<span className="ck-sp" /></div>
+      {hasComplexSets
+        ? <div className="complex-head-bar"><span>{t('Barbell Complex — 5 Movements per Set')}</span><span>{t('Weight & Reps')}</span></div>
+        : <div className={'sethead' + (col3 ? ' eff3' : '') + (timed ? ' timed' : '') + (perSide ? ' per-side' : '') + (wc.steppers ? '' : ' plain')}><span className="n-sp" /><span className="w-sp">{col1.hd}</span>{col2 && <span className="r-sp">{col2.hd}</span>}{col3 && <span className={col3.eff ? 'eff-sp' : 'r-sp'}>{col3.hd}</span>}{timed && <span className="ck-sp" />}<span className="ck-sp" /></div>}
       <span id={optsId} className="vh">{t('Options: copy, remove')}</span>
       {entry.sets.map((s, i) => {
         const warm = isWarmupRow(s)
@@ -1404,7 +1456,13 @@ function ActiveWorkout() {
     }
     else {
       // An extra set past a pyramid copies the last one's target, Max included.
-      const row = { w: l ? l.w : 0, r: l ? l.r : e.target.reps, done: false, ...(l && l.max ? { max: true } : {}) }
+      const row = {
+        w: l ? l.w : 0,
+        r: l ? l.r : e.target.reps,
+        done: false,
+        ...(l && l.max ? { max: true } : {}),
+        ...(Array.isArray(l?.subLifts) ? { subLifts: l.subLifts.map(m => ({ ...m })) } : {}),
+      }
       // A unilateral exercise keeps adding per-side rows (issue #60): seed each side from the
       // previous set's own side when it had one, else split the row's total evenly.
       e.sets.push(isPerSide({ ...(e.target || {}), id: e.id })

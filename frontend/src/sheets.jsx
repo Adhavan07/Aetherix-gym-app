@@ -2339,6 +2339,7 @@ function ExConfig({ ex, existing, onSave, onDelete, onReplace, close, routine, i
       if (c.backoff === true && backoffOffered(out, 'reps', ex, bw) && isBackoff({ ...out, backoff: true })) out.backoff = true
       // A pyramid has its own Max set for this, so the flag is not offered (or kept) there.
       if (!list.length) Object.assign(out, withFailure)
+      if (Array.isArray(c.subLifts) && c.subLifts.length) out.subLifts = c.subLifts.map(m => ({ ...m }))
       saveAs(out)
     }
   }

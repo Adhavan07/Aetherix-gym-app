@@ -210,10 +210,17 @@ export const hasCompletedWork = set => isSideSet(set)
   ? set.sides.L.done === true || set.sides.R.done === true
   : set?.done === true
 
+export function isComplexSet(set) {
+  return Array.isArray(set?.subLifts) && set.subLifts.length > 0
+}
+
 /** Actual completed load x reps; the scalar maximum weight is only a summary. */
 export function completedVolumeOf(set) {
   if (isSideSet(set)) return completedVolumeOf(set.sides.L) + completedVolumeOf(set.sides.R)
   if (!set?.done) return 0
+  if (isComplexSet(set)) {
+    return set.subLifts.reduce((sum, m) => sum + (Number(m?.w) || 0) * (Number(m?.r) || 0), 0) + extraVolumeOf(set)
+  }
   return (Number(set.w) || 0) * (Number(set.r) || 0) + extraVolumeOf(set)
 }
 
