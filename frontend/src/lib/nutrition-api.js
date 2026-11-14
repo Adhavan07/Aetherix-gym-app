@@ -18,13 +18,30 @@ const LIVE_API_SOURCES = new Set([
   'curated+nutritionix',
 ])
 
+export function isAiSource(src) {
+  const s = String(src || '').toLowerCase()
+  return s === 'ai' || s.startsWith('ai:')
+}
+
 export function isLiveApiSource(src) {
-  return LIVE_API_SOURCES.has(String(src || '').toLowerCase())
+  const s = String(src || '').toLowerCase()
+  return LIVE_API_SOURCES.has(s) || isAiSource(s)
 }
 
 export function formatNutrientSourceLabel(src, t = x => x) {
   const s = String(src || '').toLowerCase()
   switch (s) {
+    case 'ai:gemini':
+      return t('Gemini AI estimate')
+    case 'ai:chatgpt':
+      return t('ChatGPT estimate')
+    case 'ai:grok':
+      return t('Grok AI estimate')
+    case 'ai:claude':
+      return t('Claude AI estimate')
+    case 'ai:external':
+    case 'ai':
+      return t('AI chat estimate')
     case 'edamam':
     case 'curated+edamam':
       return t('Edamam Nutrition API')
@@ -46,12 +63,18 @@ export function formatNutrientSourceLabel(src, t = x => x) {
     case 'stored':
     case 'library':
     default:
+      if (s.startsWith('ai:')) return t('AI chat estimate')
       return t('USDA & IFCT nutrition dataset')
   }
 }
 
 export function shortProviderBadge(src) {
   const s = String(src || '').toLowerCase()
+  if (s === 'ai:gemini') return 'Gemini AI'
+  if (s === 'ai:chatgpt') return 'ChatGPT'
+  if (s === 'ai:grok') return 'Grok AI'
+  if (s === 'ai:claude') return 'Claude AI'
+  if (s.startsWith('ai:') || s === 'ai') return 'AI'
   if (s.includes('edamam')) return 'Edamam'
   if (s.includes('nutritionix')) return 'Nutritionix'
   if (s.includes('usda')) return 'USDA'

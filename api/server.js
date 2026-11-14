@@ -41,6 +41,16 @@ import { atomicWrite as durableWrite } from './durable.js';
 import { ipv6Groups, guardedLookup, pushEndpointError, MAX_PUSH_ENDPOINT } from './net-guard.js';
 import { excusedOn, nudgeFor, nudgeWindowOpen, toneOf } from './nudge.js';
 import { searchNutritionDb, analyzeMealNutrition } from './nutrition-db.js';
+import {
+  mintAiSyncKey,
+  verifyAiSyncKey,
+  extractAiKeyFromRequest,
+  enrichAiFoodPayload,
+  appendAiMealToState,
+  summarizeFoodDay,
+  buildOpenApiSpec,
+  analyzeFoodPhotoWithGemini,
+} from '../src/ai-food-bridge.mjs';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -614,6 +624,14 @@ function sessionUser(tok) {
 function readSession(req) {
   return sessionOf(req)?.user || null;
 }
+function readAiSyncUser(req, urlObj = null) {
+  const tok = extractAiKeyFromRequest(req, urlObj);
+  if (!tok) return null;
+  return verifyAiSyncKey(tok, SECRET, {
+    findUser: uid => db.users.find(u => u.id === uid) || null,
+    requireUserMatch: true,
+  });
+}
 // Guard for /api/admin/* — resolves the caller and 401/403s if they aren't an admin.
 function requireAdmin(req, res) {
   const user = readSession(req);
@@ -690,6 +708,13 @@ const originsMatch = (a, b) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '');
 // Whether a Bearer is the credential that would act on this request: it verifies, and no session
 // cookie sits beside it (readSession takes the cookie first, so a cookie is what would act then).
 function bearerAuthenticates(req) {
+  const aiTok = extractAiKeyFromRequest(req);
+  if (aiTok && !cookieToken(req)) {
+    return !!verifyAiSyncKey(aiTok, SECRET, {
+      findUser: uid => db.users.find(u => u.id === uid) || null,
+      requireUserMatch: true,
+    });
+  }
   const auth = req.headers.authorization || '';
   if (!auth.startsWith('Bearer ') || cookieToken(req)) return false;
   return !!sessionUser(auth.slice(7).trim());
@@ -2077,6 +2102,107 @@ const routes = {
     json(res, 200, out);
   },
 
+  /* ---------- Universal AI Chat Food & Calorie Sync ---------- */
+  'GET /api/ai/key': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    json(res, 200, {
+      hasKey: Boolean(user.aiKeyId),
+      preview: user.aiKeyPreview || null,
+      createdAt: user.aiKeyCreatedAt || null,
+    });
+  },
+
+  'POST /api/ai/key': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    const minted = mintAiSyncKey(user.id, SECRET);
+    user.aiKeyId = minted.keyId;
+    user.aiKeyPreview = minted.preview;
+    user.aiKeyCreatedAt = minted.createdAt;
+    saveDb();
+    json(res, 200, {
+      ok: true,
+      key: minted.key,
+      preview: minted.preview,
+      createdAt: minted.createdAt,
+    });
+  },
+
+  'DELETE /api/ai/key': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    delete user.aiKeyId;
+    delete user.aiKeyPreview;
+    delete user.aiKeyCreatedAt;
+    saveDb();
+    json(res, 200, { ok: true, hasKey: false });
+  },
+
+  'GET /api/ai/openapi.json': async (req, res) => {
+    const sp = new URL(req.url, 'http://x').searchParams;
+    const reqOrigin = String(req.headers['x-aetherix-origin'] || '').trim();
+    const qOrigin = String(sp.get('origin') || '').trim();
+    const chosen = /^https?:\/\/[^/\s]+$/i.test(qOrigin)
+      ? qOrigin
+      : /^https?:\/\/[^/\s]+$/i.test(reqOrigin)
+        ? reqOrigin
+        : ORIGIN;
+    json(res, 200, buildOpenApiSpec(chosen));
+  },
+
+  'GET /api/ai/food-log': async (req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const user = readAiSyncUser(req, u) || readSession(req);
+    if (!user) return json(res, 401, { error: 'invalid or missing AI sync key' });
+    const state = readStateStrict(user.id);
+    if (state === UNREADABLE) return json(res, 503, { error: 'state unreadable' });
+    const dateParam = u.searchParams.get('date') || '';
+    json(res, 200, summarizeFoodDay(state || {}, dateParam));
+  },
+
+  'POST /api/ai/food-log': async (req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const hasAiKey = Boolean(extractAiKeyFromRequest(req, u));
+    const user = hasAiKey ? readAiSyncUser(req, u) : readSession(req);
+    if (!user) return json(res, 401, { error: hasAiKey ? 'invalid or revoked AI sync key' : 'not signed in' });
+    const body = await readBody(req);
+    const cur = readStateStrict(user.id);
+    if (cur === UNREADABLE) return json(res, 503, { error: 'state unreadable' });
+
+    const enriched = await enrichAiFoodPayload(body || {}, DATA, cur?.reminder?.tz || null);
+    if (enriched.error) return json(res, 400, { error: enriched.error });
+
+    const applied = appendAiMealToState(cur, enriched.meal, { widKeep: WID_KEEP });
+    atomicWrite(stateFile(user.id), JSON.stringify(applied.nextState));
+    stateCache.delete(user.id);
+
+    json(res, 200, {
+      ok: true,
+      entry: applied.entry,
+      savedFood: applied.savedFood,
+      category: enriched.meal.category,
+      rev: applied.rev,
+      wid: applied.wid,
+      dailySummary: applied.dailySummary,
+    });
+  },
+
+  'POST /api/ai/analyze-photo': async (req, res) => {
+    const body = await readBody(req);
+    try {
+      const result = await analyzeFoodPhotoWithGemini({
+        base64: body?.image || body?.base64 || body?.dataUrl || '',
+        mimeType: body?.mimeType || 'image/jpeg',
+        hint: body?.hint || '',
+      }, DATA);
+      json(res, 200, result);
+    } catch (err) {
+      const status = Number(err?.status) || 500;
+      json(res, status, { error: err?.message || 'photo analysis failed', code: err?.code || 'photo-error' });
+    }
+  },
+
   // Public config the login screen needs before anyone is signed in. `coach` is absent unless
   // the instance has both switched the Coach on and successfully connected a provider — the
   // single flag every piece of Coach UI hangs off, so an unconfigured instance is byte-for-byte
@@ -3029,7 +3155,7 @@ const server = http.createServer(async (req, res) => {
       'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
       // The CF-Access-* pair: a phone's Cloudflare Access service token (frontend lib/cf-access.js),
       // for an Access application that passes OPTIONS through to the origin.
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, CF-Access-Client-Id, CF-Access-Client-Secret',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Aetherix-Key, X-Api-Key, CF-Access-Client-Id, CF-Access-Client-Secret',
       'Access-Control-Max-Age': '86400',
       ...(pna ? { 'Access-Control-Allow-Private-Network': 'true' } : {})
     });

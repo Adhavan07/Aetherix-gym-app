@@ -28,5 +28,5 @@ const sheetOpen = () => document.body.style.position === 'fixed'
 export function retapTab(path) {
   if (sheetOpen()) return
   if (window.scrollY > AT_TOP) { scrollToTop(); return }
-  if (path === '/library') document.querySelector('#app > .page:not(.under) .search input')?.focus()
+  if (path === '/library' || path === '/sports') document.querySelector('#app > .page:not(.under) .search input')?.focus()
 }

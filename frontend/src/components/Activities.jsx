@@ -23,17 +23,18 @@ import CardHead from './CardHead.jsx'
 import DateField from './DateField.jsx'
 import { Button, NumberField, Segmented, Stepper, TextField } from './ui.jsx'
 
-function ActivitySheet({ existing = null, defaultDate = null, close }) {
+function ActivitySheet({ existing = null, defaultDate = null, defaultPresetKey = null, close }) {
   const S = useStore(s => s.S)
   const update = useStore(s => s.update)
   const ui = useUI.getState()
+  const initialPreset = !existing && defaultPresetKey ? presetForKey(defaultPresetKey) : null
 
-  const [sportKey, setSportKey] = useState(existing?.sportKey || 'custom')
-  const [name, setName] = useState(existing?.name || '')
+  const [sportKey, setSportKey] = useState(existing?.sportKey || initialPreset?.key || 'custom')
+  const [name, setName] = useState(existing?.name || (initialPreset ? t(initialPreset.label) : ''))
   const [date, setDate] = useState(existing?.d || defaultDate || todayISO())
   const [durationMin, setDurationMin] = useState(existing?.durationMin || 60)
   const [mode, setMode] = useState(existing?.mode === 'manual' ? 'manual' : 'met')
-  const [met, setMet] = useState(existing?.met || 6)
+  const [met, setMet] = useState(existing?.met || initialPreset?.met || 6)
   const [manualKcal, setManualKcal] = useState(existing?.kcal || 300)
   const [fallbackBw, setFallbackBw] = useState(null)
   const [note, setNote] = useState(existing?.note || '')
@@ -275,9 +276,9 @@ function ActivitySheet({ existing = null, defaultDate = null, close }) {
   )
 }
 
-export function openActivitySheet(existing = null, defaultDate = null) {
+export function openActivitySheet(existing = null, defaultDate = null, defaultPresetKey = null) {
   return useUI.getState().openSheet(close => (
-    <ActivitySheet existing={existing} defaultDate={defaultDate} close={close} />
+    <ActivitySheet existing={existing} defaultDate={defaultDate} defaultPresetKey={defaultPresetKey} close={close} />
   ))
 }
 

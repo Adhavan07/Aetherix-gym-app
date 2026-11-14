@@ -2,6 +2,16 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { searchNutritionDb, analyzeMealNutrition } from '../src/nutrition-engine.mjs';
+import {
+  mintAiSyncKey,
+  verifyAiSyncKey,
+  extractAiKeyFromRequest,
+  enrichAiFoodPayload,
+  appendAiMealToState,
+  summarizeFoodDay,
+  buildOpenApiSpec,
+  analyzeFoodPhotoWithGemini,
+} from '../src/ai-food-bridge.mjs';
 
 const DATA_DIR = process.env.DATA_DIR || '/tmp/aetherix-data';
 const SECRET = process.env.SESSION_SECRET || 'aetherix-serverless-hmac-key-v1';
@@ -68,8 +78,10 @@ function readSession(req) {
   const auth = req.headers?.authorization || '';
   if (/^Bearer\s+/i.test(auth)) {
     const tok = auth.replace(/^Bearer\s+/i, '').trim();
-    const s = verifyToken(tok);
-    if (s?.user?.id) return s.user;
+    if (!tok.startsWith('ax_')) {
+      const s = verifyToken(tok);
+      if (s?.user?.id) return s.user;
+    }
   }
   const cookies = parseCookies(req);
   if (cookies.aetherix_sess) {
@@ -77,6 +89,16 @@ function readSession(req) {
     if (s?.user?.id) return s.user;
   }
   return null;
+}
+
+function readAiSyncUser(req, urlObj = null) {
+  const tok = extractAiKeyFromRequest(req, urlObj);
+  if (!tok) return null;
+  const users = readUsers();
+  return verifyAiSyncKey(tok, SECRET, {
+    findUser: uid => users.find(u => u.id === uid) || null,
+    requireUserMatch: false,
+  });
 }
 
 function sessionCookieHeader(user, req) {
@@ -168,9 +190,24 @@ async function readJsonBody(req) {
 
 export default async function handler(req, res) {
   ensureDir();
-  const urlObj = new URL(req.url || '/api/health', `https://${req.headers?.host || 'localhost'}`);
+  const proto = String(req.headers?.['x-forwarded-proto'] || 'https').split(',')[0].trim();
+  const host = String(req.headers?.['x-forwarded-host'] || req.headers?.host || 'localhost').split(',')[0].trim();
+  const reqOrigin = `${proto}://${host}`;
+  const urlObj = new URL(req.url || '/api/health', `https://${host}`);
   const pathname = urlObj.pathname.replace(/\/+$/, '') || '/api';
   const method = (req.method || 'GET').toUpperCase();
+
+  if (req.headers?.origin) {
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  if (method === 'OPTIONS') {
+    res.statusCode = 204;
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Aetherix-Key, X-Api-Key');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    return res.end();
+  }
 
   try {
     if (method === 'GET' && pathname === '/api/health') {
@@ -196,6 +233,95 @@ export default async function handler(req, res) {
       const body = await readJsonBody(req);
       const out = await analyzeMealNutrition(body || {}, DATA_DIR);
       return sendJson(res, 200, out);
+    }
+
+    if (pathname === '/api/ai/key') {
+      const sessionUser = readSession(req);
+      if (!sessionUser) return sendJson(res, 401, { error: 'not signed in' });
+      const users = readUsers();
+      const idx = users.findIndex(u => u.id === sessionUser.id);
+      const stored = idx >= 0 ? users[idx] : null;
+      if (method === 'GET') {
+        return sendJson(res, 200, {
+          hasKey: Boolean(stored?.aiKeyId),
+          preview: stored?.aiKeyPreview || null,
+          createdAt: stored?.aiKeyCreatedAt || null,
+        });
+      }
+      if (method === 'POST') {
+        const minted = mintAiSyncKey(sessionUser.id, SECRET);
+        if (idx >= 0) {
+          users[idx] = { ...stored, aiKeyId: minted.keyId, aiKeyPreview: minted.preview, aiKeyCreatedAt: minted.createdAt };
+        } else {
+          users.push({ id: sessionUser.id, name: sessionUser.name || 'User', aiKeyId: minted.keyId, aiKeyPreview: minted.preview, aiKeyCreatedAt: minted.createdAt });
+        }
+        writeUsers(users);
+        return sendJson(res, 200, {
+          ok: true,
+          key: minted.key,
+          preview: minted.preview,
+          createdAt: minted.createdAt,
+        });
+      }
+      if (method === 'DELETE') {
+        if (idx >= 0) {
+          const updated = { ...stored };
+          delete updated.aiKeyId;
+          delete updated.aiKeyPreview;
+          delete updated.aiKeyCreatedAt;
+          users[idx] = updated;
+          writeUsers(users);
+        }
+        return sendJson(res, 200, { ok: true, hasKey: false });
+      }
+    }
+
+    if (method === 'GET' && pathname === '/api/ai/openapi.json') {
+      const qOrigin = String(urlObj.searchParams.get('origin') || '').trim();
+      const chosen = /^https?:\/\/[^/\s]+$/i.test(qOrigin) ? qOrigin : reqOrigin;
+      return sendJson(res, 200, buildOpenApiSpec(chosen));
+    }
+
+    if (pathname === '/api/ai/food-log') {
+      const hasAiKey = Boolean(extractAiKeyFromRequest(req, urlObj));
+      const user = hasAiKey ? readAiSyncUser(req, urlObj) : readSession(req);
+      if (!user) return sendJson(res, 401, { error: hasAiKey ? 'invalid or revoked AI sync key' : 'not signed in' });
+      const st = readUserState(user.id);
+      if (method === 'GET') {
+        const dateParam = urlObj.searchParams.get('date') || '';
+        return sendJson(res, 200, summarizeFoodDay(st || {}, dateParam));
+      }
+      if (method === 'POST') {
+        const body = await readJsonBody(req);
+        const enriched = await enrichAiFoodPayload(body || {}, DATA_DIR, st?.reminder?.tz || null);
+        if (enriched.error) return sendJson(res, 400, { error: enriched.error });
+        const applied = appendAiMealToState(st, enriched.meal);
+        writeUserState(user.id, applied.nextState);
+        return sendJson(res, 200, {
+          ok: true,
+          entry: applied.entry,
+          savedFood: applied.savedFood,
+          category: enriched.meal.category,
+          rev: applied.rev,
+          wid: applied.wid,
+          dailySummary: applied.dailySummary,
+        });
+      }
+    }
+
+    if (method === 'POST' && pathname === '/api/ai/analyze-photo') {
+      const body = await readJsonBody(req);
+      try {
+        const result = await analyzeFoodPhotoWithGemini({
+          base64: body?.image || body?.base64 || body?.dataUrl || '',
+          mimeType: body?.mimeType || 'image/jpeg',
+          hint: body?.hint || '',
+        }, DATA_DIR);
+        return sendJson(res, 200, result);
+      } catch (err) {
+        const status = Number(err?.status) || 500;
+        return sendJson(res, status, { error: err?.message || 'photo analysis failed', code: err?.code || 'photo-error' });
+      }
     }
 
     if (method === 'GET' && pathname === '/api/me') {

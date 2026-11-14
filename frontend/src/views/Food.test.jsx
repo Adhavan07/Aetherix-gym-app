@@ -8,6 +8,7 @@ import { DEF, useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
 import { bindUI } from '../components/ui.jsx'
 import { todayISO } from '../lib/format.js'
+import { openAiFoodUrl, _resetAiFoodLinksForTests } from '../components/AiFoodSync.jsx'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -36,6 +37,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  _resetAiFoodLinksForTests()
   act(() => root.unmount())
   host.remove()
   useStore.setState({ S: originalS, user: originalUser })
@@ -344,6 +346,145 @@ describe('Food calorie tracker view', () => {
       globalThis.fetch = origFetch
     }
   })
+
+  it('opens Connect AI Chats sheet, switches Gemini/ChatGPT/Grok/Claude tabs, and generates a Sync Key', async () => {
+    const origFetch = globalThis.fetch
+    globalThis.fetch = async (url, init) => {
+      const s = String(url)
+      if (s.endsWith('/api/ai/key') && (!init?.method || init.method === 'GET')) {
+        return { ok: true, status: 200, json: async () => ({ configured: false, preview: '', createdAt: null }) }
+      }
+      if (s.endsWith('/api/ai/key') && init?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            key: 'ax_mockPayload.mockSignature',
+            keyId: 'kid1',
+            preview: 'ax_••••ature',
+            createdAt: 1700000000000,
+          }),
+        }
+      }
+      return { ok: false, status: 404, json: async () => ({}) }
+    }
+
+    try {
+      await act(async () => {
+        root.render(
+          <>
+            <Food />
+            <Modals />
+          </>
+        )
+      })
+
+      const connectBtn = host.querySelector('[data-connect-ai-btn]')
+      expect(connectBtn).toBeTruthy()
+      await act(async () => { connectBtn.click() })
+
+      const sheet = document.querySelector('[data-ai-connect-sheet]')
+      expect(sheet).toBeTruthy()
+      expect(sheet.querySelector('[data-ai-prompt-text]').textContent).toContain('ai=gemini')
+
+      const chatgptTab = [...sheet.querySelectorAll('.ai-plat-seg button')].find(b => b.textContent.includes('ChatGPT'))
+      expect(chatgptTab).toBeTruthy()
+      await act(async () => { chatgptTab.click() })
+      expect(sheet.querySelector('[data-ai-prompt-text]').textContent).toContain('ai=chatgpt')
+
+      const claudeTab = [...sheet.querySelectorAll('.ai-plat-seg button')].find(b => b.textContent.includes('Claude'))
+      await act(async () => { claudeTab.click() })
+      expect(sheet.querySelector('[data-ai-prompt-text]').textContent).toContain('ai=claude')
+
+      const genKeyBtn = sheet.querySelector('[data-generate-ai-key]')
+      expect(genKeyBtn).toBeTruthy()
+      await act(async () => { genKeyBtn.click() })
+
+      const freshKeyBox = sheet.querySelector('[data-ai-fresh-key]')
+      expect(freshKeyBox).toBeTruthy()
+      expect(freshKeyBox.textContent).toContain('ax_mockPayload.mockSignature')
+    } finally {
+      globalThis.fetch = origFetch
+    }
+  })
+
+  it('imports a pasted AI reply inside Log food -> AI Import and logs it with AI attribution', async () => {
+    await act(async () => {
+      root.render(
+        <>
+          <Food />
+          <Modals />
+        </>
+      )
+    })
+
+    const logFoodBtn = [...host.querySelectorAll('[data-food-budget] button')].find(b => b.textContent.includes('Log food'))
+    await act(async () => { logFoodBtn.click() })
+
+    const aiTab = [...document.querySelectorAll('[data-food-log-sheet] .food-source-seg button')].find(b => b.textContent.includes('AI Import'))
+    expect(aiTab).toBeTruthy()
+    await act(async () => { aiTab.click() })
+
+    const area = document.querySelector('[data-ai-paste-input]')
+    expect(area).toBeTruthy()
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    await act(async () => {
+      setter.call(area, 'Chicken Paneer Bowl\nCalories: 540 kcal\nProtein: 44g\nCarbs: 38g\nFat: 22g\nVia Gemini')
+      area.dispatchEvent(new Event('input', { bubbles: true }))
+      area.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+
+    const parseBtn = document.querySelector('[data-parse-ai-reply]')
+    await act(async () => { parseBtn.click() })
+
+    expect(document.querySelector('#log-custom-name').value).toBe('Chicken Paneer Bowl')
+    const saveBtn = [...document.querySelectorAll('[data-food-log-sheet] button')].find(b => b.textContent.includes('Log 540 kcal'))
+    expect(saveBtn).toBeTruthy()
+    await act(async () => { saveBtn.click() })
+
+    const entry = useStore.getState().S.foodLog[0]
+    expect(entry.name).toBe('Chicken Paneer Bowl')
+    expect(entry.kcal).toBe(540)
+    expect(entry.nutrientSource).toBe('ai:gemini')
+    expect(entry.nutrients.proteinG).toBe(44)
+  })
+
+  it('opens AI Meal Preview modal from a clickable AI deep link and logs with category & optional library save', async () => {
+    await act(async () => {
+      root.render(
+        <>
+          <Food />
+          <Modals />
+        </>
+      )
+    })
+
+    const opened = await act(async () => openAiFoodUrl(
+      'https://aetherix.app/#/food?name=Masala%20Omelette&kcal=280&p=20&c=4&f=20&cat=Breakfast&qty=1&unit=plate&ai=chatgpt'
+    ))
+    expect(opened).toBe(true)
+
+    const preview = document.querySelector('[data-ai-meal-preview]')
+    expect(preview).toBeTruthy()
+    expect(preview.textContent).toContain('ChatGPT')
+    expect(preview.textContent).toContain('280 kcal')
+
+    const libToggle = preview.querySelector('[role="switch"]')
+    expect(libToggle).toBeTruthy()
+    await act(async () => { libToggle.click() })
+
+    const confirmBtn = preview.querySelector('[data-confirm-ai-meal]')
+    await act(async () => { confirmBtn.click() })
+
+    const entry = useStore.getState().S.foodLog[0]
+    expect(entry.name).toBe('Masala Omelette')
+    expect(entry.kcal).toBe(280)
+    expect(entry.nutrientSource).toBe('ai:chatgpt')
+    expect(useStore.getState().S.foods).toHaveLength(1)
+    expect(useStore.getState().S.foods[0].category).toBe('Breakfast')
+  })
 })
+
+
 
 

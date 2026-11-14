@@ -41,7 +41,7 @@ describe('the tab bar across a store write', () => {
   it('keeps the very same buttons instead of rebuilding them every tick', () => {
     act(() => { root.render(<TabBar onStart={() => {}} />) })
     const before = tabs()
-    expect(before).toHaveLength(6)
+    expect(before).toHaveLength(7)
 
     // What a rest does once a second: S is replaced, so everything reading it re-renders.
     act(() => { useStore.getState().update(s => { s.restSec = 91 }, false) })
@@ -55,10 +55,11 @@ describe('the tab bar across a store write', () => {
     act(() => { root.render(<TabBar onStart={() => {}} />) })
     expect(tabs()[0].className).toBe('on')
     expect(tabs()[1].className).toBe('')
-    expect(tabs()[2].className).toBe('start')
+    expect(tabs()[2].className).toBe('')
+    expect(tabs()[3].className).toBe('start')
 
     act(() => { useStore.getState().update(s => { s.active = { id: 'a', entries: [], cur: 0 } }, false) })
-    expect(tabs()[2].className).toBe('start rec')
+    expect(tabs()[3].className).toBe('start rec')
     expect(tabs()[0].className).toBe('on')
   })
 })
@@ -90,12 +91,12 @@ describe('the tab icons and labels', () => {
   const label = el => el.querySelector('span:last-child').textContent
   it('labels every tab and uses one icon per concept', () => {
     act(() => { root.render(<TabBar onStart={() => {}} />) })
-    expect(tabs().map(icon)).toEqual(['house', 'calendar', 'play', 'utensils', 'chart', 'dumbbell'])
-    expect(tabs().map(label)).toEqual(['Home', 'Plan', 'Start', 'Food', 'Stats', 'Exercises'])
+    expect(tabs().map(icon)).toEqual(['house', 'calendar', 'trophy', 'play', 'utensils', 'chart', 'dumbbell'])
+    expect(tabs().map(label)).toEqual(['Home', 'Plan', 'Sports', 'Start', 'Food', 'Stats', 'Exercises'])
 
     act(() => { useStore.getState().update(s => { s.active = { id: 'a', entries: [], cur: 0 } }, false) })
-    expect(icon(tabs()[2])).toBe('play')
-    expect(label(tabs()[2])).toBe('Resume')
+    expect(icon(tabs()[3])).toBe('play')
+    expect(label(tabs()[3])).toBe('Resume')
   })
 
   it('shows a minimized session’s running time, still named Resume', () => {
@@ -104,16 +105,16 @@ describe('the tab icons and labels', () => {
       vi.setSystemTime(new Date(2026, 9, 5, 18, 0, 0))
       act(() => { useStore.getState().update(s => { s.active = { id: 'a', entries: [], cur: 0, start: Date.now() - 754_000 } }, false) })
       act(() => { root.render(<TabBar onStart={() => {}} />) })
-      const start = tabs()[2]
+      const start = tabs()[3]
       expect(label(start)).toBe('12:34')
       expect(start.getAttribute('aria-label')).toBe('Resume')
       act(() => { vi.advanceTimersByTime(2000) })
       expect(label(start)).toBe('12:36')
-      expect(tabs()[2]).toBe(start)   // the same button, only its text ticks
+      expect(tabs()[3]).toBe(start)   // the same button, only its text ticks
 
       // a past workout being edited has no clock running
       act(() => { useStore.getState().update(s => { s.active.editingWorkoutId = 'w1' }, false) })
-      expect(label(tabs()[2])).toBe('Edit workout')
+      expect(label(tabs()[3])).toBe('Edit workout')
     } finally { vi.useRealTimers() }
   })
 })

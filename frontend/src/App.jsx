@@ -49,6 +49,7 @@ import { openDeviceLinkRedeem } from './components/Passkeys.jsx'
 import { useAnimPacksBoot } from './components/Animations.jsx'
 import { useNfcTagLinks } from './components/Nfc.jsx'
 import { useRoutineLinks } from './components/RoutineShare.jsx'
+import { useAiFoodLinks } from './components/AiFoodSync.jsx'
 import { useBadgesWatcher } from './components/Badges.jsx'
 import Login from './views/Login.jsx'
 import MobileOnboarding from './views/MobileOnboarding.jsx'
@@ -86,6 +87,7 @@ const RoutineEdit = lazyView(() => import('./views/RoutineEdit.jsx'))
 const Programmes = lazyView(() => import('./views/Programmes.jsx'))
 const ProgrammeEdit = lazyView(() => import('./views/Programmes.jsx').then(m => ({ default: m.ProgrammeEdit })))
 const Food = lazyView(() => import('./views/Food.jsx'))
+const Sports = lazyView(() => import('./views/Sports.jsx'))
 const Badges = lazyView(() => import('./views/Badges.jsx'))
 const Stats = lazyView(() => import('./views/Stats.jsx'))
 const History = lazyView(() => import('./views/History.jsx'))
@@ -339,6 +341,7 @@ function Shell() {
   useNfcTagLinks(setupDone)
   // A friend's routine link (components/RoutineShare.jsx): the same wait for the setup.
   useRoutineLinks(setupDone)
+  useAiFoodLinks(setupDone)
   useBadgesWatcher(setupDone)
   useEffect(() => {
     if (!setupDone || tourAsked.current) return
@@ -378,6 +381,7 @@ function Shell() {
       <Route path="/plan/r/:id" element={<RoutineEdit />} />
       <Route path="/plan/programmes" element={<Programmes />} />
       <Route path="/plan/prog/:id" element={<ProgrammeEdit />} />
+      <Route path="/sports" element={<Sports />} />
       <Route path="/workout" element={<Workout />} />
       <Route path="/food" element={<Food />} />
       <Route path="/badges" element={<Badges />} />

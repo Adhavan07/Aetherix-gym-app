@@ -84,6 +84,11 @@ async function boot() {
   // Single-origin reverse proxy for /api/* -> plain node:http api/server.js
   app.use('/api', (req, res) => {
     const headers = { ...req.headers };
+    const origHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+    const origProto = String(req.headers['x-forwarded-proto'] || (isHttpsPreview ? 'https' : 'http')).split(',')[0].trim();
+    if (origHost && !headers['x-aetherix-origin']) {
+      headers['x-aetherix-origin'] = `${origProto}://${origHost}`;
+    }
     headers.host = `127.0.0.1:${API_PORT}`;
     if (headers.origin) {
       headers.origin = rawOrigin;

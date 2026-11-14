@@ -265,6 +265,10 @@ export default function Modals() {
       const onAnchor = () => { anchored = true }
       window.addEventListener('workout-scroll-anchor', onAnchor, { once: true })
       window.setTimeout(() => {
+        if (typeof window === 'undefined' || typeof document === 'undefined') {
+          drainScrollRestore(close)
+          return
+        }
         window.removeEventListener('workout-scroll-anchor', onAnchor)
         if (hadKeyboard && !anchored && document.body.style.position !== 'fixed') window.scrollTo(0, restoreY)
         drainScrollRestore(close)

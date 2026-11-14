@@ -113,7 +113,7 @@ export const DEF = {
   // running ({ id, startedOn, pausedOn?, cycle, bump, saved }) or null. Starting one writes its
   // schedule into `week` or `rotation` above, so everything that reads those follows it.
   programmes: {}, programme: null,
-  exWeights: {}, workouts: [], activities: [], calorieTarget: null, foods: [], foodLog: [], badges: {}, active: null, customEx: [], gifSize: 'full',
+  exWeights: {}, workouts: [], activities: [], calorieTarget: null, sportGoalMin: 150, foods: [], foodLog: [], badges: {}, active: null, customEx: [], gifSize: 'full',
   // Stats activity heatmap metric. Profiles without this key continue to open on time.
   heatmapMetric: 'time',
   // Settings → Units → "Count warm-ups in volume" (#719): off keeps volume to work sets.

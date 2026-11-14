@@ -43,11 +43,13 @@ import {
   analyzeNutritionApi,
   enrichLoggedFoodFromApi,
 } from '../lib/nutrition-api.js'
+import { analyzeFoodPhotoClient, parseAiChatReplyText } from '../lib/ai-food-sync.js'
 import Icon from '../components/Icon.jsx'
 import CardHead from '../components/CardHead.jsx'
 import DateField from '../components/DateField.jsx'
 import EmptyState from '../components/EmptyState.jsx'
-import { Button, SearchField, Segmented, Stepper, Switch, TextField } from '../components/ui.jsx'
+import { openAiConnectSheet } from '../components/AiFoodSync.jsx'
+import { Button, SearchField, Segmented, Stepper, Switch, TextArea, TextField } from '../components/ui.jsx'
 
 function fmtNutrientAmount(val, unit) {
   const n = Number(val) || 0
@@ -513,6 +515,12 @@ function LogFoodSheet({ date, initialFood = null, existingEntry = null, close })
   const [saveToLibrary, setSaveToLibrary] = useState(!existingEntry && !initialFood)
   const [qty, setQty] = useState(existingEntry?.qty || 1)
   const [entryDate, setEntryDate] = useState(existingEntry?.d || date || todayISO())
+  const [aiPasteText, setAiPasteText] = useState('')
+  const [aiHint, setAiHint] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiNutrients, setAiNutrients] = useState(null)
+  const [aiSourceTag, setAiSourceTag] = useState(null)
+  const [aiNote, setAiNote] = useState('')
   const [err, setErr] = useState('')
 
   // Live database search (instant local catalog + backend /api/nutrition/search across Edamam/Nutritionix/USDA/OpenFoodFacts)
@@ -613,17 +621,17 @@ function LogFoodSheet({ date, initialFood = null, existingEntry = null, close })
 
   const activeName = liveExistingEntry
     ? liveExistingEntry.name
-    : mode === 'custom'
+    : mode === 'custom' || mode === 'ai'
       ? customName
       : chosenFood?.name || customName
   const activeUnit = liveExistingEntry
     ? liveExistingEntry.unitLabel
-    : mode === 'custom'
+    : mode === 'custom' || mode === 'ai'
       ? customUnit
       : chosenFood?.unitLabel || customUnit
   const activeKcalPerUnit = liveExistingEntry
     ? liveExistingEntry.kcalPerUnit
-    : mode === 'custom'
+    : mode === 'custom' || mode === 'ai'
       ? customKcalPerUnit
       : chosenFood?.kcal ?? chosenFood?.kcalPerUnit ?? customKcalPerUnit
 
@@ -641,14 +649,17 @@ function LogFoodSheet({ date, initialFood = null, existingEntry = null, close })
     if (chosenFood?.nutrients) {
       return { nutrients: chosenFood.nutrients, source: chosenFood.nutrientSource || chosenFood.source || 'library' }
     }
-    if (mode === 'custom') {
+    if (mode === 'ai' && aiNutrients) {
+      return { nutrients: aiNutrients, source: aiSourceTag || 'ai:external' }
+    }
+    if (mode === 'custom' || mode === 'ai') {
       if (remoteAnalysis?.query?.toLowerCase() === customName.trim().toLowerCase() && remoteAnalysis?.nutrients) {
         return {
           nutrients: remoteAnalysis.nutrients,
           source: remoteAnalysis.source || remoteAnalysis.provider || 'curated',
         }
       }
-      return { nutrients: localCustomAnalysis.nutrients, source: localCustomAnalysis.source }
+      return { nutrients: localCustomAnalysis.nutrients, source: mode === 'ai' ? (aiSourceTag || 'ai:external') : localCustomAnalysis.source }
     }
     const fallback = analyzeFoodText(activeName, activeKcalPerUnit, customCategory)
     return { nutrients: fallback.nutrients, source: fallback.source }
@@ -658,6 +669,8 @@ function LogFoodSheet({ date, initialFood = null, existingEntry = null, close })
     mode,
     selectedDbFood,
     chosenFood,
+    aiNutrients,
+    aiSourceTag,
     remoteAnalysis,
     customName,
     localCustomAnalysis,
@@ -689,7 +702,7 @@ function LogFoodSheet({ date, initialFood = null, existingEntry = null, close })
         ? foodCategoryOf(chosenFood)
         : customCategory
 
-    if (!liveExistingEntry && (mode === 'custom' || mode === 'database') && saveToLibrary) {
+    if (!liveExistingEntry && (mode === 'custom' || mode === 'database' || mode === 'ai') && saveToLibrary) {
       const built = buildFoodItem({
         name: activeName,
         category: catToUse,
@@ -772,15 +785,59 @@ function LogFoodSheet({ date, initialFood = null, existingEntry = null, close })
     })
   }
 
+  const applyAiParsedMeal = (meal, notice = '') => {
+    setCustomName(meal.name || '')
+    setCustomCategory(meal.category || DEFAULT_FOOD_CATEGORY)
+    setCustomUnit(meal.unitLabel || 'serving')
+    setCustomKcalPerUnit(meal.kcalPerUnit || 250)
+    if (meal.qty && meal.qty >= 0.5) setQty(meal.qty)
+    setAiNutrients(meal.nutrients || null)
+    setAiSourceTag(meal.nutrientSource || 'ai:external')
+    setAiNote(notice)
+    setErr('')
+  }
+
+  const handleAiReplyParse = (textVal = aiPasteText) => {
+    const parsed = parseAiChatReplyText(textVal)
+    if (!parsed) {
+      setErr(t('Could not read a meal name or calories from that reply. Try editing the meal details below.'))
+      return
+    }
+    applyAiParsedMeal(parsed, t('Imported from AI reply — check details below before logging'))
+  }
+
+  const handleFoodPhotoChange = async e => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || aiBusy) return
+    setAiBusy(true)
+    setErr('')
+    setAiNote('')
+    try {
+      const meal = await analyzeFoodPhotoClient(file, aiHint)
+      applyAiParsedMeal(meal, meal.confidenceNote || t('Calculated from photo — adjust portion if needed'))
+    } catch (error) {
+      if (error?.code === 'gemini-not-configured' || error?.status === 503) {
+        setErr(t('Direct photo scan is not enabled on this server yet. Paste a reply from Gemini, ChatGPT, Grok, or Claude below, or tap Connect AI.'))
+      } else {
+        setErr(error?.message || t('Could not analyze photo.'))
+      }
+    } finally {
+      setAiBusy(false)
+    }
+  }
+
   const sourceOptions = foods.length > 0
     ? [
-        { value: 'library', label: t('From library') },
+        { value: 'library', label: t('Library') },
         { value: 'database', label: t('Database') },
-        { value: 'custom', label: t('Custom food') },
+        { value: 'custom', label: t('Custom') },
+        { value: 'ai', label: t('AI Import'), icon: 'sparkles' },
       ]
     : [
         { value: 'custom', label: t('Custom food') },
         { value: 'database', label: t('Database') },
+        { value: 'ai', label: t('AI Import'), icon: 'sparkles' },
       ]
 
   const livePreviewNutrients = useMemo(
@@ -807,6 +864,7 @@ function LogFoodSheet({ date, initialFood = null, existingEntry = null, close })
         <div className="sheet-field">
           <span className="sheet-label" id="food-source-label">{t('Source')}</span>
           <Segmented
+            className="food-source-seg"
             ariaLabelledby="food-source-label"
             value={mode}
             onChange={v => { setMode(v); setErr('') }}
@@ -886,7 +944,84 @@ function LogFoodSheet({ date, initialFood = null, existingEntry = null, close })
         </div>
       )}
 
-      {!existingEntry && !initialFood && mode === 'custom' && (
+      {!existingEntry && !initialFood && mode === 'ai' && (
+        <div className="sheet-field" data-food-ai-import>
+          <div className="ai-photo-box">
+            <div className="ai-box-head">
+              <div>
+                <div className="ai-box-title">{t('Scan food photo')}</div>
+                <div className="ai-box-sub">{t('Upload or snap your plate to calculate calories & macros.')}</div>
+              </div>
+              <label className={'ai-photo-pick' + (aiBusy ? ' is-busy' : '')}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  disabled={aiBusy}
+                  onChange={handleFoodPhotoChange}
+                  data-ai-photo-input
+                />
+                <Icon name="camera" />
+                <span>{aiBusy ? t('Analyzing…') : t('Photo')}</span>
+              </label>
+            </div>
+            <TextField
+              value={aiHint}
+              onChange={e => setAiHint(e.target.value)}
+              placeholder={t('Optional note (e.g. extra ghee, half rice)')}
+              aria-label={t('Photo context note')}
+            />
+          </div>
+
+          <div className="sheet-field">
+            <label className="sheet-label" htmlFor="ai-paste-input">
+              {t('Or paste reply from Gemini, ChatGPT, Grok, or Claude')}
+            </label>
+            <TextArea
+              id="ai-paste-input"
+              rows={3}
+              value={aiPasteText}
+              onChange={e => { setAiPasteText(e.target.value); setErr('') }}
+              onPaste={e => {
+                const pasted = e.clipboardData?.getData('text')
+                if (pasted && !aiPasteText.trim()) {
+                  setTimeout(() => handleAiReplyParse(pasted), 0)
+                }
+              }}
+              placeholder={t('Paste meal summary, nutrition breakdown, or JSON from any AI chat…')}
+              data-ai-paste-input
+            />
+            <div className="ai-paste-actions">
+              <Button
+                size="sm"
+                variant="tinted"
+                icon="sparkles"
+                onClick={() => handleAiReplyParse(aiPasteText)}
+                data-parse-ai-reply
+              >
+                {t('Parse reply')}
+              </Button>
+              <Button
+                size="sm"
+                variant="plain"
+                icon="link"
+                onClick={() => { close(); openAiConnectSheet() }}
+                data-open-ai-connect-from-log
+              >
+                {t('Connect AI Chats')}
+              </Button>
+            </div>
+          </div>
+
+          {aiNote && (
+            <div className="nutri-estimate-hint" data-ai-import-note>
+              <span>{aiNote}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!existingEntry && !initialFood && (mode === 'custom' || mode === 'ai') && (
         <>
           <div className="sheet-field">
             <label className="sheet-label" htmlFor="log-custom-name">{t('Food name')}</label>
@@ -894,9 +1029,13 @@ function LogFoodSheet({ date, initialFood = null, existingEntry = null, close })
               id="log-custom-name"
               placeholder={t('e.g. 3 dosa and fish curry, Rice and two eggs')}
               value={customName}
-              onChange={e => { setCustomName(e.target.value); setErr('') }}
+              onChange={e => {
+                setCustomName(e.target.value)
+                if (aiNutrients) { setAiNutrients(null); setAiSourceTag(null) }
+                setErr('')
+              }}
             />
-            {localUnscaledEstimate.matched && (
+            {mode === 'custom' && localUnscaledEstimate.matched && (
               <div className="nutri-estimate-hint" data-custom-meal-estimate>
                 <span>
                   {localUnscaledEstimate.items.map(it => `${it.name}${it.qty !== 1 ? ` × ${fmtNum(it.qty)}` : ''}`).join(' + ')}
@@ -951,7 +1090,7 @@ function LogFoodSheet({ date, initialFood = null, existingEntry = null, close })
               aria-label={t('Also save to personal library')}
             />
           </div>
-          {saveToLibrary && (
+          {(saveToLibrary || mode === 'ai') && (
             <div className="sheet-field">
               <span className="sheet-label">{t('Category')}</span>
               <div className="chips" role="group" aria-label={t('Food category presets')}>
@@ -1192,6 +1331,9 @@ export default function Food() {
           >
             <Icon name="medal" />
           </button>
+          <Button size="sm" variant="tinted" icon="sparkles" onClick={openAiConnectSheet} data-connect-ai-btn>
+            {t('Connect AI')}
+          </Button>
           <Button size="sm" variant="tinted" icon="target" onClick={openTargetSheet}>
             {summary.target != null ? `${summary.target} kcal` : t('Set target')}
           </Button>
