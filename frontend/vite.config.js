@@ -107,8 +107,9 @@ const apiCoachCore = resolve(fileURLToPath(new URL('.', import.meta.url)), '../a
 const srcCoachCore = resolve(fileURLToPath(new URL('.', import.meta.url)), '../src/coach-core')
 const coachCoreFallback = {
   name: 'opengym-coach-core-fallback',
+  enforce: 'pre',
   resolveId(source) {
-    if (existsSync(apiCoachCore)) return null
+    if (existsSync(join(apiCoachCore, 'categories.js'))) return null
     const idx = source.indexOf('api/coach/core/')
     if (idx === -1) return null
     const target = join(srcCoachCore, source.slice(idx + 'api/coach/core/'.length))
