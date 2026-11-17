@@ -33,6 +33,7 @@ export function setType(set) {
 }
 export const isDropSet = set => setType(set) === 'dropset'
 export const isRestPauseSet = set => setType(set) === 'restpause'
+export const isClusterSet = set => isRestPauseSet(set) && objectOf(set).cluster === true
 
 // A set taken to failure (Discord request, roadmap "a universal AMRAP / to failure flag"). Not a
 // third `type`: a drop-set or a rest-pause set can be taken to failure as well, so it is its own

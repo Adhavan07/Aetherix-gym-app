@@ -124,6 +124,15 @@ export const DEF = {
     clearanceConfirmed: false,
     updatedAt: 0,
   },
+  warmupPlan: null,
+  physiqueCoach: {
+    activeId: 'coach_alberto_nunez',
+    sleepHours: 7.5,
+    restDaysPerWeek: 2,
+    soreness: 'moderate',
+    energy: 'good',
+    updatedAt: 0,
+  },
   foods: [], foodLog: [], badges: {}, active: null, customEx: [], gifSize: 'full',
   // Stats activity heatmap metric. Profiles without this key continue to open on time.
   heatmapMetric: 'time',

@@ -11,3 +11,17 @@ export const DATA_CATEGORIES = Object.freeze([
   'profile',     // the intake answers you gave the Coach, including any limitations
   'prefs'        // unit, language, effort scale
 ]);
+
+export const OPTIONAL_CATEGORIES = Object.freeze([
+  Object.freeze({ id: 'records', on: true }),
+  Object.freeze({ id: 'measurements', on: true }),
+  Object.freeze({ id: 'health', on: false }),
+]);
+
+export function shareOf(S) {
+  const set = S && S.coach && S.coach.share && typeof S.coach.share === 'object' ? S.coach.share : {};
+  const out = {};
+  for (const c of OPTIONAL_CATEGORIES) out[c.id] = typeof set[c.id] === 'boolean' ? set[c.id] : c.on;
+  return out;
+}
+

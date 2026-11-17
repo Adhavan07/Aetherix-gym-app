@@ -11,6 +11,7 @@ import { backoffAt, backoffStepOf, backoffWeights } from './backoff.js'
 import { dbLoadOf, bellsIn, volumeFactor, historyAs, ownedFloor } from './dumbbells.js'
 import { isRungRow, rungWeight } from './warmup-snap.js'
 import { bodyLoadOf, bodyweightFor, countsBodyweight } from './bw-load.js'
+import { setBandsOf, bandsOf, usesBands, nextBandsUp } from './bands.js'
 const objectOf = value => value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 // Completed-state-independent work rows whose authoritative mode matches the requested mode.
 const workRowsForMode = (entry = {}, mode = 'reps') => {
@@ -87,6 +88,11 @@ export const repStep = cfg => (isPerSide(cfg) ? 2 : 1)
 export const setsFromRows = (cfg, rows) => {
   const n = Math.max(0, Number(rows) || 0)
   return modeOf(cfg) === 'time' && isPerSide(cfg) ? Math.ceil(n / 2) : n
+}
+
+export function fmtMetres(m) {
+  const v = Math.max(0, Number(m) || 0)
+  return v >= 1000 ? `${fmtNum(Math.round(v / 10) / 100)} km` : `${fmtNum(Math.round(v))} m`
 }
 
 // mm:ss for a work duration — seconds alone read badly past a minute ("90 s" vs "1:30").
@@ -565,6 +571,27 @@ export function nextTrainingDay(S, iso) {
  * (barFloor). `options.step` is the exercise's loading step, passed in by the caller (see
  * insertWarmupRow for why this module cannot read it itself).
  */
+function bandSeed(S, cfg, options = {}) {
+  if (!cfg || modeOf(cfg) !== 'reps' || !usesBands(S, cfg.id, cfg)) return null
+  const plan = setBandsOf({ bands: cfg.bands })
+  const last = options.useTarget ? null : lastEntryFor(S, cfg.id, options.rid)
+  const lastWork = last ? (last.sets || []).filter(x => !isWarmupRow(x) && !isSideSet(x)) : []
+  const anyBands = lastWork.some(x => setBandsOf(x).length)
+  if (!anyBands && !plan.length) return null
+  const top = cfg.repsMax > 0 ? cfg.repsMax : cfg.reps
+  const climb = anyBands && cfg.prog !== 'off' && !(cfg.weight > 0) && top > 0 && lastWork.every(x => Number(x.r) >= top)
+  const from = cfg.repsMin > 0 ? cfg.repsMin : cfg.reps
+  return { plan, lastWork, anyBands, climb, from }
+}
+
+export function bandClimbReps(S, cfg, options = {}) {
+  const seed = bandSeed(S, cfg, options)
+  if (!seed?.climb || !(seed.from > 0)) return 0
+  const list = bandsOf(S)
+  const first = setBandsOf(seed.lastWork[0])
+  return first.length && nextBandsUp(first, list) ? seed.from : 0
+}
+
 export function buildSets(S, cfg, options = {}) {
   const rows = buildWorkSets(S, cfg, options)
   const warm = Math.max(0, Math.min(MAX_PLANNED_WARMUPS, Math.round(cfg.warmupSets) || 0))

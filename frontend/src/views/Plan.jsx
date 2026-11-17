@@ -32,13 +32,22 @@ import {
 import { isOn } from '../lib/modules.js'
 import { unlockBadgeInState } from '../lib/badges.js'
 import { findJvrRoundRoutine, installJvrRoundRoutine } from '../lib/jvr-round.js'
+import PlanWarmupStudio from '../components/PlanWarmupStudio.jsx'
+import PhysiqueCoachesHub from '../components/PhysiqueCoachesHub.jsx'
 
-// Plan has two views (v1.3.11): Schedule (how you train, and when) and Routines (what you
-// train). The last one you looked at comes back: a per-device convenience, never synced, so it
-// lives in this browser's storage and not in S.
+// Plan has four views: Schedule (how you train, and when), Routines (what you
+// train), Warm-up (guided 5-minute dynamic stretching), and Coaches (physique coaches & inspirations).
 export const PLAN_VIEW_KEY = 'gym_plan_view'
+const PLAN_VIEWS = new Set(['schedule', 'routines', 'warmup', 'coaches'])
 const readView = () => {
-  try { return localStorage.getItem(PLAN_VIEW_KEY) === 'routines' ? 'routines' : 'schedule' } catch { return 'schedule' }
+  try {
+    const q = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('view') : null
+    if (PLAN_VIEWS.has(q)) return q
+    const saved = localStorage.getItem(PLAN_VIEW_KEY)
+    return PLAN_VIEWS.has(saved) ? saved : 'schedule'
+  } catch {
+    return 'schedule'
+  }
 }
 
 /* Undo for Plan's two removals (v1.3.11). Both go through the store's normal update, so sync
@@ -153,7 +162,7 @@ export default function Plan() {
   const showCoach = isOn(S, 'coach') && coachAvailable(config, user, { demo: DEMO, mobile: MOBILE, coachMode })
 
   // Share, print, import and starter plans: one menu behind the header button, so the
-  // two views below are only about the plan itself.
+  // views below are only about the plan itself.
   const openMenu = () => {
     const has = planHasRoutines(S)
     menuSheet({
@@ -173,10 +182,19 @@ export default function Plan() {
   const mode = scheduleModeOf(S)
   // A running programme wrote the schedule below (lib/programmes.js); the strip says whose it is.
   const progChip = programmeChip(S)
+  const subtitle = view === 'coaches'
+    ? t('Division coaches, bodybuilding inspirations & recovery gap check')
+    : view === 'warmup'
+      ? t('5-minute dynamic stretch prep for JVR Round & high-intensity circuits')
+      : view === 'routines'
+        ? t('Your saved workouts & templates')
+        : mode === 'rotation'
+          ? t('Your routines in a loop')
+          : t('Your weekly routine')
 
   return <div className="narrow plan">
     <div className="hdr">
-      <div><h1>{t('Plan')}</h1><div className="sub">{mode === 'rotation' ? t('Your routines in a loop') : t('Your weekly routine')}</div></div>
+      <div><h1>{t('Plan')}</h1><div className="sub">{subtitle}</div></div>
       <div className="hdr-actions">
         {showCoach && <Button size="sm" variant="tinted" icon="sparkles" onClick={() => nav('/coach')}>{t('Coach')}</Button>}
         <button className="iconbtn" data-tour="plan-menu" onClick={openMenu} aria-label={t('Plan options')} title={t('Plan options')}><Icon name="share" /></button>
@@ -184,13 +202,22 @@ export default function Plan() {
     </div>
     <input ref={fileRef} type="file" accept="application/json,.json" onChange={pickFile} hidden />
     <Segmented className="plan-views" tour="plan-views" value={view} onChange={setView}
-      options={[{ value: 'schedule', label: t('Schedule') }, { value: 'routines', label: t('Routines') }]} />
-    {progChip && <button type="button" className="prog-strip" onClick={() => nav('/plan/programmes')}>
+      options={[
+        { value: 'schedule', label: t('Schedule') },
+        { value: 'routines', label: t('Routines') },
+        { value: 'warmup', label: t('Warm-up') },
+        { value: 'coaches', label: t('Coaches') },
+      ]} />
+    {progChip && view !== 'warmup' && view !== 'coaches' && <button type="button" className="prog-strip" onClick={() => nav('/plan/programmes')}>
       <Icon name="calendar" /><span className="grow">{S.programmes?.[S.programme?.id]?.name || t('Programme')}</span><span className="tag acc">{progChip}</span>
     </button>}
-    {view === 'routines'
-      ? <Routines S={S} update={update} nav={nav} />
-      : <Schedule S={S} update={update} nav={nav} mode={mode} />}
+    {view === 'coaches'
+      ? <PhysiqueCoachesHub S={S} update={update} onOpenRoutine={id => nav('/plan/r/' + id)} />
+      : view === 'warmup'
+        ? <PlanWarmupStudio S={S} update={update} onOpenRoutines={() => setView('routines')} />
+        : view === 'routines'
+          ? <Routines S={S} update={update} nav={nav} />
+          : <Schedule S={S} update={update} nav={nav} mode={mode} />}
   </div>
 }
 

@@ -53,3 +53,4 @@ assets/bmc-cover*
 # scripts/pdf/render-samples.mjs output (npm run pdf:check)
 frontend/pdf-samples/
 .vercel
+.env*

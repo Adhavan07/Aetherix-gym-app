@@ -27,6 +27,7 @@ import {
   HiitWorkoutAndTimerPanel,
   openHealthSafetySheet,
 } from '../components/HyroxHiitStudio.jsx'
+import PhysiqueCoachesHub from '../components/PhysiqueCoachesHub.jsx'
 
 const FILTER_OPTIONS = [
   { key: 'all', label: 'All (18)' },
@@ -374,6 +375,7 @@ function CompareSportsSheet({ sports, bwKg, onRemove, close }) {
 export default function Sports() {
   const nav = useNavigate()
   const S = useStore(s => s.S)
+  const update = useStore(s => s.update)
   const openSheet = useUI(s => s.openSheet)
 
   const [section, setSection] = useState('matrix')
@@ -493,6 +495,7 @@ export default function Sports() {
             { value: 'matrix', label: t('18 Sports'), icon: 'grid' },
             { value: 'hyrox', label: t('Hyrox'), icon: 'bolt' },
             { value: 'hiit', label: t('HIIT Timer'), icon: 'timer' },
+            { value: 'coaches', label: t('Coaches'), icon: 'trophy' },
           ]}
         />
       </div>
@@ -565,7 +568,9 @@ export default function Sports() {
         </div>
       </div>
 
-      {section === 'hyrox' ? (
+      {section === 'coaches' ? (
+        <PhysiqueCoachesHub S={S} update={update} onOpenRoutine={id => nav('/plan/r/' + id)} />
+      ) : section === 'hyrox' ? (
         <HyroxWorkoutPanel
           S={S}
           safety={safety}
