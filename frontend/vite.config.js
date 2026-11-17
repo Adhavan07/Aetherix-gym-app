@@ -103,11 +103,24 @@ const flavor = {
 const pkgVersion = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version
 const appVersion = process.env.APP_BUILD ? `${pkgVersion}+${process.env.APP_BUILD}` : pkgVersion
 
+const apiCoachCore = resolve(fileURLToPath(new URL('.', import.meta.url)), '../api/coach/core')
+const srcCoachCore = resolve(fileURLToPath(new URL('.', import.meta.url)), '../src/coach-core')
+const coachCoreFallback = {
+  name: 'opengym-coach-core-fallback',
+  resolveId(source) {
+    if (existsSync(apiCoachCore)) return null
+    const idx = source.indexOf('api/coach/core/')
+    if (idx === -1) return null
+    const target = join(srcCoachCore, source.slice(idx + 'api/coach/core/'.length))
+    return existsSync(target) ? target : null
+  }
+}
+
 export default defineConfig({
   // __SEASON_CLOCK__: the seasonal QA date hook (src/lib/season-clock.js), only in a build made
   // with VITE_SEASON_CLOCK=1 for screenshots. false everywhere else, so the hook is compiled out.
   define: { __APP_VERSION__: JSON.stringify(appVersion), __SEASON_CLOCK__: JSON.stringify(process.env.VITE_SEASON_CLOCK === '1') },
-  plugins: [react(), umami, flavor, swStamp, catalogueMedia],
+  plugins: [react(), umami, flavor, swStamp, catalogueMedia, coachCoreFallback],
   base: './',
   server: {
     // The Coach's core (payload, validator, prompts, HTTP adapters) lives in ../api/coach/core
